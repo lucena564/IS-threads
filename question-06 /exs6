@@ -3,9 +3,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define MAX_THREADS 4
+#define OMP_NUM_THREADS 4 // define o número de threads de acordo com o número de núcleos do processador (valor definido aqui arbitrariamente).
 
-typedef struct {
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER; // criação de um mutex para as concorrências entre Threads.
+
+typedef struct { // criação de um struct para passar os parâmetros dentro da função de criação de thread.
     int inicio;
     int passo;
     int final;
@@ -13,22 +15,24 @@ typedef struct {
     void (*f)(int);
 } ThreadArgs;
 
-// função de thread para escalonamento estático
+// função de thread para escalonamento do tipo static
 void* thread_function_static(void* args) {
     ThreadArgs* thread_args = (ThreadArgs*)args;
-
+    
+    pthread_mutex_lock(&mutex);
     for (int i = thread_args->inicio; i < thread_args->final; i += thread_args->passo) {
         thread_args->f(i);
     }
-
+    pthread_mutex_unlock(&mutex);
     return NULL;
 }
 
-// função de thread para escalonamento dinâmico
+// função de thread para escalonamento do tipo dynamic
 void* thread_function_dynamic(void* args) {
     ThreadArgs* thread_args = (ThreadArgs*)args;
     int current_iteration = thread_args->inicio;
-
+    
+    pthread_mutex_lock(&mutex);
     while (current_iteration < thread_args->final) {
         int next_iteration = current_iteration + thread_args->chunk_size * thread_args->passo;
         if (next_iteration > thread_args->final) {
@@ -41,15 +45,17 @@ void* thread_function_dynamic(void* args) {
 
         current_iteration = next_iteration;
     }
+    pthread_mutex_unlock(&mutex);
 
     return NULL;
 }
 
-// função de thread para escalonamento orientado
+// função de thread para escalonamento do tipo guided
 void* thread_function_guided(void* args) {
     ThreadArgs* thread_args = (ThreadArgs*)args;
     int current_iteration = thread_args->inicio;
-
+    
+    pthread_mutex_lock(&mutex);
     while (current_iteration < thread_args->final) {
         int remaining_iterations = thread_args->final - current_iteration;
         int chunk_iterations = remaining_iterations / thread_args->chunk_size;
@@ -68,19 +74,22 @@ void* thread_function_guided(void* args) {
 
         current_iteration = next_iteration;
     }
+    pthread_mutex_unlock(&mutex);
 
     return NULL;
 }
 
 // função omp_for que simula a API OMP
-void omp_for(int inicio, int passo, int final, int schedule, int chunk_size, void (*f)(int)) {
-    int num_threads = MAX_THREADS;
-    pthread_t threads[MAX_THREADS];
-    ThreadArgs thread_args[MAX_THREADS];
+void omp_for(int inicio, int passo, int final, int schedule, int chunk_size, void (*f)(int)) { // a função fará o mesmo trabalho de #pragma omp for.
+    int num_threads = OMP_NUM_THREADS; // declara o número de threads.
+    pthread_t threads[OMP_NUM_THREADS]; // declara um array de tamanho = OMP_NUM_THREADS.
+    ThreadArgs thread_args[OMP_NUM_THREADS]; // array de struct que será passado como argumento posteriormente.
 
+    // define o número de interações e a quantidade de iterações por Thread.
     int num_iterations = (final - inicio + passo - 1) / passo;
     int iterations_per_thread = (num_iterations + num_threads - 1) / num_threads;
 
+    // vai preencher o array de Struct com os respectivos valores para poder ser passado para a função de criação das Threads. 
     for (int i = 0; i < num_threads; i++) {
         thread_args[i].inicio = inicio + i * iterations_per_thread * passo;
         thread_args[i].passo = passo;
@@ -90,7 +99,8 @@ void omp_for(int inicio, int passo, int final, int schedule, int chunk_size, voi
         }
         thread_args[i].chunk_size = chunk_size;
         thread_args[i].f = f;
-
+        
+        // faz a definição de qual função de criação de Thread será usada baseada na escolha do tipo de escalonamento definida pelo usuário.
         switch (schedule) {
             case 0: // static
                 pthread_create(&threads[i], NULL, thread_function_static, &thread_args[i]);
@@ -105,21 +115,31 @@ void omp_for(int inicio, int passo, int final, int schedule, int chunk_size, voi
                 printf("Invalid schedule type\n");
                 exit(1);
         }
+        
     }
 
     for (int i = 0; i < num_threads; i++) {
-        pthread_join(threads[i], NULL);
+        pthread_join(threads[i], NULL); // junta as Threads criadas com a Thread principal do sistema ao final de tudo.
     }
 }
 
 int main() {
-    void example_function(int i) {
+    void show_function(int i) {
         printf("Thread %lu: %d\n", (unsigned long)pthread_self(), i);
     }
 
-    int schedule_type = 0; // tipo de escalonamento: 0 para static, 1 para dynamic, 2 para guided
-
-    omp_for(0, 1, 10, schedule_type, 3, example_function);
+    int schedule_type,start, end, step, chunk = 0; // declarando as variáveis que serão definidas pelo usuário
+    printf("Escolha o tipo de escalonamento:\n0 - Static\n1 - Dynamic\n2 - Guided\n"); // tipo de escalonamento: 0 para static, 1 para dynamic, 2 para guided
+    scanf("%d", &schedule_type);
+    printf("Escolha o valor de início: ");
+    scanf("%d", &start);
+    printf("Escolha o valor de término: ");
+    scanf("%d", &end);
+    printf("Escolha o valor do passo: ");
+    scanf("%d", &step);
+    printf("Escolha o valor do chunk_size: ");
+    scanf("%d", &chunk);
+    omp_for(start, step, end, schedule_type, chunk, show_function); //chamada da função OMP_FOR.
 
     return 0;
 }
